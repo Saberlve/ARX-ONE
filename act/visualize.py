@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-DT = 0.01
+FPS = 60
 
 JOINT_NAMES = ["joint0", "joint1", "joint2", "joint3", "joint4", "joint5"]
 STATE_NAMES = JOINT_NAMES + ["gripper"]
@@ -87,7 +87,7 @@ def process_episode(idx, dataset_dir, individual_views):
 
     print(f"{dataset_path}.hdf5 loaded!")
 
-    save_videos(image_dict, action, DT, video_path=os.path.join(dataset_dir, dataset_name + '_video'),
+    save_videos(image_dict, action, FPS, video_path=os.path.join(dataset_dir, dataset_name + '_video'),
                 individual_views=individual_views)
     visualize_joints(qpos, action, plot_path=os.path.join(dataset_dir, dataset_name + '_qpos.png'))
     visualize_joints_vel(qvel, action, plot_path=os.path.join(dataset_dir, dataset_name + '_qvel.png'))
@@ -143,7 +143,7 @@ def main(args):
         process_episode(episode_idx, dataset_dir, individual_views)
 
 
-def save_videos(video, actions, dt, video_path=None, individual_views=False):
+def save_videos(video, actions, fps, video_path=None, individual_views=False):
     cam_names = list(video.keys())
     all_cam_videos = []
 
@@ -153,8 +153,6 @@ def save_videos(video, actions, dt, video_path=None, individual_views=False):
     all_cam_videos = [video[cam_name] for cam_name in cam_names]
     all_cam_videos_concat = np.concatenate(all_cam_videos, axis=2)  # 横向拼接：宽度方向
     n_frames, h, w, _ = all_cam_videos_concat.shape
-
-    fps = int(1 / dt)
 
     out = cv2.VideoWriter(video_path + '.mp4', cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
     for t in range(n_frames):
