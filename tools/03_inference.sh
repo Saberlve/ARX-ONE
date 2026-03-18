@@ -20,4 +20,5 @@ gnome-terminal --title="realsense" -x $shell_type -i -c "cd ${workspace}; cd ../
 sleep 3
 
 # Inference
-gnome-terminal --title="inference" -x $shell_type -i -c "cd ${workspace}; cd ../act; conda activate act; python inference.py; $shell_exec"   
+#gnome-terminal --title="inference" -x $shell_type -i -c "cd ${workspace}; cd ../act; source /opt/ros/jazzy/setup.bash; source /home/arx/endlessAI/repos/ARX_X5/ROS2/X5_ws/install/setup.bash; source ./.venv_ros/bin/activate; python inference.py; $shell_exec"
+

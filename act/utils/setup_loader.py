@@ -9,7 +9,7 @@ def setup_loader(root):
         raise RuntimeError(f"Unsupported Python version: {py.major}.{py.minor}. "
                            "Requires Python 3.8–3.12.")
 
-    base_dir = os.path.join(root, 'msg', f'{py.major}.{py.minor}')
+    base_dir = os.path.join(root, 'act' , 'msg', f'{py.major}.{py.minor}')    ##使用最新的采集格式
     lib_dir = os.path.join(base_dir, 'lib')
 
     if base_dir not in sys.path:

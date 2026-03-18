@@ -23,5 +23,8 @@ sleep 1
 gnome-terminal --title="realsense" -x $shell_type -i -c "cd ${workspace}; cd ../realsense; ./realsense.sh; $shell_exec"
 sleep 3
 
+
 # Collect
-gnome-terminal --title="collect" -x $shell_type -i -c "cd ${workspace}; cd ../act; conda activate act; python collect.py --episode_idx -1; $shell_exec"   
+# gnome-terminal --title="collect" -x $shell_type -i -c "cd ${workspace}; cd ../act; source /opt/ros/humble/setup.bash; source /home/ubuntu/edlsrobot/repos/ARX_X5/ROS2/X5_ws/install/setup.bash; source ./.venv_ros/bin/activate; python collect.py --episode_idx -1; $shell_exec"
+
+ 

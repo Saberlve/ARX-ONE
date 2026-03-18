@@ -5,9 +5,9 @@ shell_config="source ./install/setup.$shell_type"
 shell_exec="exec $shell_type"
 
 declare -A CAMS=(
-  [camera_h]=""
-  [camera_l]=""
-  [camera_r]=""
+  [camera_h]="409122270078"
+  [camera_l]="409122272787"
+  [camera_r]="230422271775"
 )
 
 COLOR_PROFILE="640x480x90"

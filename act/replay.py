@@ -9,8 +9,10 @@ from pathlib import Path
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]
+ROOT1 = FILE.parents[1]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
+    sys.path.append(str(ROOT1))
     os.chdir(str(ROOT))
 
 import yaml
@@ -115,7 +117,7 @@ def signal_handler(signal, frame, ros_operator):
 
 
 def main(args):
-    setup_loader(ROOT)
+    setup_loader(ROOT1)
 
     rclpy.init()
 
@@ -152,7 +154,7 @@ def main(args):
 def parse_args(known=False):
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--episode_path', type=str, help='episode_path', required=True)
+    parser.add_argument('--episode_path', type=str, default='datasets/episode_0.hdf5', help='episode_path', required=True)
     parser.add_argument('--frame_rate', type=int, default=60, help='frame rate')
     parser.add_argument('--data', type=str, default=Path.joinpath(ROOT, 'data/config.yaml'), help='config file')
 
@@ -171,3 +173,6 @@ def parse_args(known=False):
 if __name__ == '__main__':
     args = parse_args()
     main(args)
+
+
+#  python replay.py --episode_path 'datasets/episode_2.hdf5'

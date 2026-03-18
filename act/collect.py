@@ -9,8 +9,10 @@ from pathlib import Path
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]
-if str(ROOT) not in sys.path:
+ROOT1 = FILE.parents[1]
+if str(ROOT) not in sys.path and str(ROOT1) not in sys.path:
     sys.path.append(str(ROOT))
+    sys.path.append(str(ROOT1))
     os.chdir(str(ROOT))
 
 
@@ -182,7 +184,6 @@ def collect_information(args, ros_operator, voice_engine):
 
     return timesteps, actions, actions_eef, action_bases, action_velocities
 
-
 def compress_and_pad_images(data_dict, camera_names, use_depth, quality=50):
     def compress_and_pad(key_prefix):
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
@@ -316,24 +317,30 @@ def save_data(args, timesteps, actions, actions_eef, action_bases, action_veloci
 
 
 def main(args):
-    setup_loader(ROOT)
+    setup_loader(ROOT1)
 
     rclpy.init()
 
     config = load_yaml(args.config)
 
     ros_operator = RosOperator(args, config, in_collect=True)
+    
+    # 停止标志
+    spin_running = True
 
     def _spin_loop(node):
-        while rclpy.ok():
-            rclpy.spin_once(node, timeout_sec=0.001)
+        while spin_running and rclpy.ok():
+            try:
+                rclpy.spin_once(node, timeout_sec=0.001)
+            except rclpy._rclpy_pybind11.InvalidHandle:
+                break
 
     spin_thread = threading.Thread(target=_spin_loop, args=(ros_operator,), daemon=True)
     spin_thread.start()
 
     datasets_dir = args.datasets if sys.stdin.isatty() else Path.joinpath(ROOT, args.datasets)
 
-    num_episodes = 1000 if args.episode_idx == -1 else 1
+    num_episodes = 1000 if args.episode_idx == -1 else 3
     current_episode = 0 if args.episode_idx == -1 else args.episode_idx
 
     # 查找最大episode序号
@@ -370,9 +377,11 @@ def main(args):
         episode_num = episode_num + 1
         current_episode = current_episode + 1
 
+
+    spin_running = False
+    spin_thread.join()
     ros_operator.destroy_node()
     rclpy.shutdown()
-    spin_thread.join()
 
 
 def parse_arguments(known=False):
@@ -382,8 +391,8 @@ def parse_arguments(known=False):
     parser.add_argument('--datasets', type=str, default=Path.joinpath(ROOT, 'datasets'),
                         help='dataset dir')
     parser.add_argument('--episode_idx', type=int, default=0, help='episode index')
-    parser.add_argument('--max_timesteps', type=int, default=800, help='max timesteps')
-    parser.add_argument('--frame_rate', type=int, default=60, help='frame rate')
+    parser.add_argument('--max_timesteps', type=int, default=500, help='max timesteps')
+    parser.add_argument('--frame_rate', type=int, default=30, help='frame rate')    #60
 
     # 配置文件
     parser.add_argument('--config', type=str,
@@ -403,7 +412,8 @@ def parse_arguments(known=False):
 
     # 数据采集选项
     parser.add_argument('--key_collect', action='store_true', help='use key collect')
-
+    parser.add_argument('--is_compress', type=bool, default=True, help='is use compress image')    ##
+    
     parser.add_argument('--task', type=str, default='', help='task name')
 
     return parser.parse_known_args()[0] if known else parser.parse_args()
@@ -412,3 +422,4 @@ def parse_arguments(known=False):
 if __name__ == '__main__':
     args = parse_arguments()
     main(args)
+    voice_engine.stop()

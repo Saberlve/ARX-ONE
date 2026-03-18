@@ -21,9 +21,17 @@ from sensor_msgs.msg import Image, CompressedImage, Imu
 from tf2_msgs.msg import TFMessage
 from std_msgs.msg import Int32MultiArray
 
-from utils.controller import PIDController
+import sys
+from pathlib import Path
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+
+from act.utils.controller import PIDController
 
 import time
+import math
 
 
 class Rate:
@@ -94,6 +102,10 @@ class RosOperator(Node):
         self.joint_control = JointControl
         self.robot_cmd = RobotCmd
         self.robot_status = RobotStatus
+        
+        ## add
+        image_type = 'compress_image' if self.args.is_compress else 'original_image'
+        callback_type = CompressedImage if self.args.is_compress else Image
 
         # 摄像头订阅
         img_topics = {
@@ -103,10 +115,14 @@ class RosOperator(Node):
         }
         for key, topic in img_topics.items():
             try:
-                self.create_subscription(CompressedImage,
-                                         self.config['camera_config'][topic],
+                self.create_subscription(callback_type,
+                                         self.config['camera_config'][image_type][topic],
                                          getattr(self, f"{key}_callback"),
-                                         2)
+                                         5) ## 2
+                # self.create_subscription(CompressedImage,
+                #                          self.config['camera_config'][topic],
+                #                          getattr(self, f"{key}_callback"),
+                #                          2)
             except KeyError as e:
                 self.get_logger().error(f"Topic config missing: {e}")
             except AttributeError as e:
@@ -120,10 +136,14 @@ class RosOperator(Node):
             }
             for key, topic in depth_img_topics.items():
                 try:
-                    self.create_subscription(CompressedImage,
-                                             self.config['camera_config'][topic],
-                                             getattr(self, f"{key}_callback"),
-                                             2)
+                    self.create_subscription(callback_type,
+                                         self.config['camera_config'][image_type][topic],
+                                         getattr(self, f"{key}_callback"),
+                                         5)
+                    # self.create_subscription(CompressedImage,
+                    #                          self.config['camera_config'][topic],
+                    #                          getattr(self, f"{key}_callback"),
+                    #                          2)
                 except KeyError as e:
                     self.get_logger().error(f"Topic config missing: {e}")
                 except AttributeError as e:
@@ -146,7 +166,7 @@ class RosOperator(Node):
                 self.create_subscription(msg_type,
                                          self.config['arm_config'][topic_key],
                                          getattr(self, f"{key}_callback"),
-                                         2)
+                                         5)
             except KeyError as e:
                 self.get_logger().error(f"Topic config missing: {e}")
             except AttributeError as e:
@@ -193,7 +213,7 @@ class RosOperator(Node):
                 10
             )
 
-    # 推理
+    # # 推理
     def follow_arm_publish(self, left, right):
         if len(left) == 7:
             joint_state_msg = self.robot_status()
@@ -207,6 +227,73 @@ class RosOperator(Node):
         if len(right) != 0:
             joint_state_msg.joint_pos = right.astype(np.float64)
             self.controller_arm_right_publisher.publish(joint_state_msg)  # /joint_control2
+    # 推理, 10Hz, 插值
+    # def follow_arm_publish(self, left, right, N=10):
+    #     if len(left) != 7:
+    #         print("\033[31mERROR action\033[0m")
+    #         return
+
+    #     left = np.asarray(left, dtype=np.float64)
+    #     right = np.asarray(right, dtype=np.float64) if len(right) != 0 else None
+
+    #     if not hasattr(self, "prev_left_cmd"):
+    #         self.prev_left_cmd = None
+    #     if not hasattr(self, "prev_right_cmd"):
+    #         self.prev_right_cmd = None
+
+    #     frame_dt = 1.0 / self.args.frame_rate
+    #     sub_dt = frame_dt / N
+
+    #     if self.prev_left_cmd is None:
+    #         msg_l = self.robot_status()
+    #         msg_l.joint_pos = left.copy()
+    #         self.controller_arm_left_publisher.publish(msg_l)
+
+    #         if right is not None:
+    #             msg_r = self.robot_status()
+    #             msg_r.joint_pos = right.copy()
+    #             self.controller_arm_right_publisher.publish(msg_r)
+
+    #         self.prev_left_cmd = left.copy()
+    #         if right is not None:
+    #             self.prev_right_cmd = right.copy()
+    #         return
+
+    #     if right is not None and self.prev_right_cmd is None:
+    #         self.prev_right_cmd = right.copy()
+
+    #     start_left = self.prev_left_cmd.copy()
+    #     start_right = self.prev_right_cmd.copy() if right is not None else None
+
+    #     last_left_cmd = start_left
+    #     last_right_cmd = start_right
+
+    #     for k in range(1, N + 1):
+    #         t = k / N
+    #         s = 0.5 * (1.0 - math.cos(math.pi * t))
+
+    #         left_cmd = (1.0 - s) * start_left + s * left
+    #         last_left_cmd = left_cmd
+
+    #         msg_l = self.robot_status()
+    #         msg_l.joint_pos = left_cmd
+    #         self.controller_arm_left_publisher.publish(msg_l)
+
+    #         if right is not None:
+    #             right_cmd = (1.0 - s) * start_right + s * right
+    #             last_right_cmd = right_cmd
+
+    #             msg_r = self.robot_status()
+    #             msg_r.joint_pos = right_cmd
+    #             self.controller_arm_right_publisher.publish(msg_r)
+
+    #         if k < N:
+    #             time.sleep(sub_dt)
+
+    #     self.prev_left_cmd = last_left_cmd.copy()
+    #     if right is not None:
+    #         self.prev_right_cmd = last_right_cmd.copy()
+
 
     def init_robot_base_pose(self):
         if len(self.robot_base_origin) == 0:
@@ -375,12 +462,23 @@ class RosOperator(Node):
         right_arm = None
 
         rate = self.create_rate(self.args.frame_rate)
+        # while rclpy.ok():
+        #     if len(self.feedback_left_arm_deque) != 0:
+        #         left_arm = list(self.feedback_left_arm_deque[-1].joint_pos)
+
+        #     if len(self.feedback_right_arm_deque) != 0:
+        #         right_arm = list(self.feedback_right_arm_deque[-1].joint_pos)
+
+        #     if left_arm is not None and right_arm is not None:
+        #         break
         while rclpy.ok():
             if len(self.feedback_left_arm_deque) != 0:
-                left_arm = list(self.feedback_left_arm_deque[-1].joint_pos)
+                _, left_msg = self.feedback_left_arm_deque[-1]
+                left_arm = list(left_msg.joint_pos)
 
             if len(self.feedback_right_arm_deque) != 0:
-                right_arm = list(self.feedback_right_arm_deque[-1].joint_pos)
+                _, right_msg = self.feedback_right_arm_deque[-1]
+                right_arm = list(right_msg.joint_pos)
 
             if left_arm is not None and right_arm is not None:
                 break
@@ -396,33 +494,57 @@ class RosOperator(Node):
 
             if self.follow_arm_publish_lock.acquire(False):
                 return
+            # 原来的
+            # left_done = self._update_arm_position(left_target, left_arm, left_symbol, arm_steps_length)
+            # right_done = self._update_arm_position(right_target, right_arm, right_symbol, arm_steps_length)
+            left_next, left_done = self._update_arm_position(left_target, left_arm, left_symbol, arm_steps_length)
+            right_next, right_done = self._update_arm_position(right_target, right_arm, right_symbol, arm_steps_length)
 
-            left_done = self._update_arm_position(left_target, left_arm, left_symbol, arm_steps_length)
-            right_done = self._update_arm_position(right_target, right_arm, right_symbol, arm_steps_length)
+            # 同步 publish
+            joint_state_msg = self.robot_status()
+            joint_state_msg.joint_pos = np.asarray(left_next, dtype=np.float64)
+            self.controller_arm_left_publisher.publish(joint_state_msg)
+
+            joint_state_msg.joint_pos = np.asarray(right_next, dtype=np.float64)
+            self.controller_arm_right_publisher.publish(joint_state_msg)
+
+            # 更新 arm 为下一帧状态
+            left_arm = left_next
+            right_arm = right_next
+            # 更新 arm 状态
+            left_arm = left_next
+            right_arm = right_next
+
+            # 打印步数
+            step += 1
+            print("arm_publish_continuous:", step)
 
             if left_done > len(left_target) - 1 and right_done > len(right_target) - 1:
                 print('left_done and right_done')
 
                 break
 
-            # JointControl topic
-            if len(left_arm) == 7:
-                joint_state_msg = self.robot_status()
-            else:
-                print("\033[31mInvalid joint length\033[0m")
-
-                return
-
-            joint_state_msg.joint_pos = np.asarray(left_target, dtype=np.float64)
-            self.controller_arm_left_publisher.publish(joint_state_msg)
             rate.sleep()
+            
+            ## 原来的
+            # # JointControl topic
+            # if len(left_arm) == 7:
+            #     joint_state_msg = self.robot_status()
+            # else:
+            #     print("\033[31mInvalid joint length\033[0m")
 
-            joint_state_msg.joint_pos = np.asarray(right_target, dtype=np.float64)
-            self.controller_arm_right_publisher.publish(joint_state_msg)
+            #     return
 
-            step += 1
-            print("arm_publish_continuous:", step)
-            rate.sleep()
+            # joint_state_msg.joint_pos = np.asarray(left_target, dtype=np.float64)
+            # self.controller_arm_left_publisher.publish(joint_state_msg)
+            # rate.sleep()
+
+            # joint_state_msg.joint_pos = np.asarray(right_target, dtype=np.float64)
+            # self.controller_arm_right_publisher.publish(joint_state_msg)
+
+            # step += 1
+            # print("arm_publish_continuous:", step)
+            # rate.sleep()
 
     def _extract_eef_data(self, eef):
         return [eef.x, eef.y, eef.z, eef.roll, eef.pitch, eef.yaw]
@@ -444,6 +566,8 @@ class RosOperator(Node):
         }
 
         # 获取图像信息
+        img_ts = {} ##
+        arm_ts = {} ##
         for cam_name in self.args.camera_names:
             if cam_name in img_data:
                 deque_map = {
@@ -454,12 +578,22 @@ class RosOperator(Node):
 
                 if len(deque_map[cam_name]) == 0:
                     print(f'there is no {cam_name}_deque')
-
                     return None
 
                 # 是否压缩处理图像
-                img_data[cam_name] = self.bridge.compressed_imgmsg_to_cv2(deque_map[cam_name].pop(),
-                                                                          'passthrough')
+                cam_ts, cam_msg = deque_map[cam_name].pop() ##
+                img_ts[cam_name] = cam_ts
+                # # img_data[cam_name] = self.bridge.compressed_imgmsg_to_cv2(deque_map[cam_name].pop(),'passthrough') #颜色不对
+                # img_data[cam_name] = self.bridge.compressed_imgmsg_to_cv2(deque_map[cam_name].pop(),'rgb8')
+                ## add
+                # if self.args.is_compress:
+                #     img_data[cam_name] = self.bridge.compressed_imgmsg_to_cv2(deque_map[cam_name].pop(),'rgb8')
+                # else:
+                #     img_data[cam_name] = self.bridge.imgmsg_to_cv2(deque_map[cam_name].pop(),'rgb8')
+                if self.args.is_compress:
+                    img_data[cam_name] = self.bridge.compressed_imgmsg_to_cv2(cam_msg, 'rgb8')
+                else:
+                    img_data[cam_name] = self.bridge.imgmsg_to_cv2(cam_msg, 'rgb8')
 
             if self.args.use_depth_image:
                 if cam_name in img_depth_data:
@@ -475,9 +609,8 @@ class RosOperator(Node):
                         print(f'there is no {key}_deque')
 
                         return None
-
-                    img_depth_data[key] = self.bridge.imgmsg_to_cv2(deque_map[key].pop(),
-                                                                    'passthrough')
+                    ##
+                    img_depth_data[key] = self.bridge.imgmsg_to_cv2(deque_map[key].pop(), 'passthrough')
 
         # 获取机械臂状态
         for arm_name in ['left_arm', 'right_arm']:
@@ -491,12 +624,15 @@ class RosOperator(Node):
 
                 return None
 
-            arm_data[arm_name] = deque_map[arm_name].pop()
+            # arm_data[arm_name] = deque_map[arm_name].pop()
+            arm_ts_ns, arm_msg = deque_map[arm_name].pop()  ##
+            arm_ts[arm_name] = arm_ts_ns    ##
+            arm_data[arm_name] = arm_msg    ##
 
         obs_dict = collections.OrderedDict()  # 有序的字典
 
         # 保存图像
-        obs_dict['images'] = {cam: img for cam, img in img_data.items() if cam in self.args.camera_names}
+        obs_dict['images'] = {cam: img for cam, img in img_data.items() if cam in self.args.camera_names}   #(480,640,3)
 
         if self.args.use_depth_image:
             obs_dict['images_depth'] = {cam: img_depth_data[cam] for cam in img_depth_data if
@@ -520,6 +656,8 @@ class RosOperator(Node):
                                            np.array(arm_data['right_arm'].joint_vel)), axis=0)
         obs_dict['effort'] = np.concatenate((np.array(arm_data['left_arm'].joint_cur),
                                              np.array(arm_data['right_arm'].joint_cur)), axis=0)
+        obs_dict['img_ts'] = img_ts ##
+        obs_dict['arm_ts'] = arm_ts ##
 
         # 保存底盘状态
         if self.args.use_base and ts != 0:
@@ -576,8 +714,10 @@ class RosOperator(Node):
                 return None
 
         # 获取主臂状态
-        left_frame = deque_map['control_left_arm_deque'].pop()
-        right_frame = deque_map['control_right_arm_deque'].pop()
+        # left_frame = deque_map['control_left_arm_deque'].pop()
+        # right_frame = deque_map['control_right_arm_deque'].pop()
+        _, left_frame = deque_map['control_left_arm_deque'].pop()   ##
+        _, right_frame = deque_map['control_right_arm_deque'].pop()
 
         control_left_arm = left_frame.end_pos
         control_right_arm = right_frame.end_pos
@@ -596,21 +736,31 @@ class RosOperator(Node):
         action_dict['action_base'] = np.zeros((13,))  # waiting for the obersevation
 
         return action_dict
-
+    ##
+    def _msg_time_ns(self, msg):
+        """
+        优先用消息自带时间戳；如果没有 header.stamp，就退回本机时间
+        """
+        if hasattr(msg, "header") and hasattr(msg.header, "stamp"):
+            return int(msg.header.stamp.sec) * 1_000_000_000 + int(msg.header.stamp.nanosec)
+        return time.time_ns()
     def img_head_callback(self, msg):
-        if len(self.img_head_deque) >= 2000:
+        if len(self.img_head_deque) >= 2000: #2000
             self.img_head_deque.popleft()
-        self.img_head_deque.append(msg)
+        # self.img_head_deque.append(msg)
+        self.img_head_deque.append((self._msg_time_ns(msg), msg)) ##
 
     def img_left_callback(self, msg):
         if len(self.img_left_deque) >= 2000:
             self.img_left_deque.popleft()
-        self.img_left_deque.append(msg)
+        # self.img_left_deque.append(msg)
+        self.img_left_deque.append((self._msg_time_ns(msg), msg))
 
     def img_right_callback(self, msg):
         if len(self.img_right_deque) >= 2000:
             self.img_right_deque.popleft()
-        self.img_right_deque.append(msg)
+        # self.img_right_deque.append(msg)
+        self.img_right_deque.append((self._msg_time_ns(msg), msg))
 
     def img_head_depth_callback(self, msg):
         if len(self.img_head_depth_deque) >= 2000:
@@ -627,27 +777,55 @@ class RosOperator(Node):
             self.img_right_depth_deque.popleft()
         self.img_right_depth_deque.append(msg)
 
+    # def controller_left_callback(self, msg):
+    #     if len(self.controller_left_deque) >= 2000:
+    #         self.controller_left_deque.popleft()
+    #     self.controller_left_deque.append(msg)
+    #     self.feedback_left_arm_deque.append(msg)
     def controller_left_callback(self, msg):
+        item = (self._msg_time_ns(msg), msg)
+
         if len(self.controller_left_deque) >= 2000:
             self.controller_left_deque.popleft()
-        self.controller_left_deque.append(msg)
-        self.feedback_left_arm_deque.append(msg)
+        self.controller_left_deque.append(item)
 
+        if len(self.feedback_left_arm_deque) >= 2000:
+            self.feedback_left_arm_deque.popleft()
+        self.feedback_left_arm_deque.append(item)
+
+    # def controller_right_callback(self, msg):
+    #     if len(self.controller_right_deque) >= 2000:
+    #         self.controller_right_deque.popleft()
+    #     self.controller_right_deque.append(msg)
+        # self.feedback_right_arm_deque.append(msg)
     def controller_right_callback(self, msg):
+        item = (self._msg_time_ns(msg), msg)
+
         if len(self.controller_right_deque) >= 2000:
             self.controller_right_deque.popleft()
-        self.controller_right_deque.append(msg)
-        self.feedback_right_arm_deque.append(msg)
+        self.controller_right_deque.append(item)
 
+        if len(self.feedback_right_arm_deque) >= 2000:
+            self.feedback_right_arm_deque.popleft()
+        self.feedback_right_arm_deque.append(item)
+
+    # def feedback_left_callback(self, msg):
+    #     if len(self.feedback_left_arm_deque) >= 2000:
+    #         self.feedback_left_arm_deque.popleft()
+    #     self.feedback_left_arm_deque.append(msg)
     def feedback_left_callback(self, msg):
         if len(self.feedback_left_arm_deque) >= 2000:
             self.feedback_left_arm_deque.popleft()
-        self.feedback_left_arm_deque.append(msg)
+        self.feedback_left_arm_deque.append((self._msg_time_ns(msg), msg))
 
+    # def feedback_right_callback(self, msg):
+    #     if len(self.feedback_right_arm_deque) >= 2000:
+    #         self.feedback_right_arm_deque.popleft()
+    #     self.feedback_right_arm_deque.append(msg)
     def feedback_right_callback(self, msg):
         if len(self.feedback_right_arm_deque) >= 2000:
             self.feedback_right_arm_deque.popleft()
-        self.feedback_right_arm_deque.append(msg)
+        self.feedback_right_arm_deque.append((self._msg_time_ns(msg), msg))
 
     # robot robot_base
     def robot_base_callback(self, msg):
@@ -693,15 +871,59 @@ class RosOperator(Node):
                     self.triggered_joys[i] = joy.copy()
 
             self.last_joy = joy
+    ## 原来
+    # def _update_arm_position(self, target, arm, symbol, steps_length):
+    #     diff = [abs(target[i] - arm[i]) for i in range(len(target))]
+    #     done = 0
+    #     for i in range(len(target)):
+    #         if diff[i] < steps_length[i]:
+    #             arm[i] = target[i]
+    #             done += 1
+    #         else:
+    #             arm[i] += symbol[i] * steps_length[i]
 
+    #     return done
     def _update_arm_position(self, target, arm, symbol, steps_length):
-        diff = [abs(target[i] - arm[i]) for i in range(len(target))]
+        """
+        target: 目标关节
+        arm: 当前关节状态（会被修改）
+        symbol: 每个关节移动方向 (+1/-1)
+        steps_length: 每帧最大移动量
+        """
         done = 0
+
+        # arm_next 存放每个关节下一步的位置
+        arm_next = arm.copy()
+
         for i in range(len(target)):
-            if diff[i] < steps_length[i]:
-                arm[i] = target[i]
+            diff = abs(target[i] - arm[i])
+            if diff < steps_length[i]:
+                arm_next[i] = target[i]
                 done += 1
             else:
-                arm[i] += symbol[i] * steps_length[i]
+                arm_next[i] += symbol[i] * steps_length[i]
 
-        return done
+        return arm_next, done
+
+    # ## add
+    # def get_left_arm_joint_state(self):
+    #     if len(self.feedback_left_arm_deque) == 0:
+    #         # 没有反馈就返回零位
+    #         return [0.0] * 7
+    #     return list(self.feedback_left_arm_deque[-1].joint_pos)
+    def get_left_arm_joint_state(self):
+        if len(self.feedback_left_arm_deque) == 0:
+            return [0.0] * 7
+        _, msg = self.feedback_left_arm_deque[-1]
+        return list(msg.joint_pos)
+
+    # def get_right_arm_joint_state(self):
+    #     if len(self.feedback_right_arm_deque) == 0:
+    #         return [0.0] * 7
+    #     return list(self.feedback_right_arm_deque[-1].joint_pos)
+    def get_right_arm_joint_state(self):
+        if len(self.feedback_right_arm_deque) == 0:
+            return [0.0] * 7
+        _, msg = self.feedback_right_arm_deque[-1]
+        return list(msg.joint_pos)
+

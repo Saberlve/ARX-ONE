@@ -1,0 +1,59 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+    
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            // "python": "/home/arx/endlessAI/repos/ROS2_AC-one_Play/act/.venv_ros/bin/python",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "args": [
+                // collect
+                // "--repo-id", "/home/arx/endlessAI/repos/ROS2_AC-one_Play/All_datas/grasp_brown_glass",
+                // "--root", "/home/arx/endlessAI/repos/ROS2_AC-one_Play/All_datas",
+                // "--push-to-hub", "false",
+
+                // // infer pi05
+                // "--robot.type=ACone",
+                // "--robot.id=my_ACone_arm",
+                // "--robot.frame_rate=30",
+                // // "--robot.cameras={ head: {type: opencv, index_or_path: /dev/video10, width: 640, height: 480, fps: 30}, left_wrist: {type: opencv, index_or_path: /dev/video10, width: 640, height: 480, fps: 30}, right_wrist: {type: opencv, index_or_path: /dev/video10, width: 640, height: 480, fps: 30}}",
+                // "--robot.cameras={\"head\":{\"type\":\"opencv\",\"index_or_path\":\"/dev/video10\",\"width\":640,\"height\":480,\"fps\":30},\"left_wrist\":{\"type\":\"opencv\",\"index_or_path\":\"/dev/video10\",\"width\":640,\"height\":480,\"fps\":30},\"right_wrist\":{\"type\":\"opencv\",\"index_or_path\":\"/dev/video10\",\"width\":640,\"height\":480,\"fps\":30}}",
+                // "--display_data=false",
+                // "--dataset.repo_id={HF_USER}/eval_ACone_pi05",
+                // "--dataset.single_task=Pick up the teapot and pour one-third of the tea into the glass.",
+                // "--policy.path=/home/ubuntu/edlsrobot/repos/ROS2_AC-one_Play/models/train/pour_tea/checkpoints/100000/pretrained_model",
+
+                // infer smolvla
+                "--robot.type=ACone",
+                "--robot.id=my_ACone_arm",
+                "--robot.frame_rate=25",
+                // "--robot.cameras={camera1: {type: opencv, index_or_path: /dev/video10, width: 640, height: 480, fps: 30}, camera2: {type: opencv, index_or_path: /dev/video10, width: 640, height: 480, fps: 30}, camera3: {type: opencv, index_or_path: /dev/video10, width: 640, height: 480, fps: 30}}",
+                "--robot.cameras={\"camera1\":{\"type\":\"opencv\",\"index_or_path\":\"/dev/video10\",\"width\":640,\"height\":480,\"fps\":30},\"camera2\":{\"type\":\"opencv\",\"index_or_path\":\"/dev/video11\",\"width\":640,\"height\":480,\"fps\":30},\"camera3\":{\"type\":\"opencv\",\"index_or_path\":\"/dev/video12\",\"width\":640,\"height\":480,\"fps\":30}}",
+                "--display_data=false",
+                "--dataset.repo_id=${HF_USER}/eval_ACone_smolvla",
+                "--dataset.single_task=Pick up the teapot and pour one-third of the tea into the glass.",
+                "--policy.path=/home/ubuntu/edlsrobot/repos/ROS2_AC-one_Play/models/train/pour_tea_smol/checkpoints/100000/pretrained_model"
+                
+                // infer act
+                // "--robot.type=ACone",
+                // "--robot.id=my_ACone_arm",
+                // "--robot.frame_rate=25",
+                // "--robot.cameras={\"head\":{\"type\":\"opencv\",\"index_or_path\":\"/dev/video10\",\"width\":640,\"height\":480,\"fps\":30},\"left_wrist\":{\"type\":\"opencv\",\"index_or_path\":\"/dev/video10\",\"width\":640,\"height\":480,\"fps\":30},\"right_wrist\":{\"type\":\"opencv\",\"index_or_path\":\"/dev/video10\",\"width\":640,\"height\":480,\"fps\":30}}",
+                // "--display_data=false",
+                // "--dataset.repo_id=${HF_USER}/eval_ACoone_act",
+                // "--dataset.single_task=Pick up the teapot and pour one-third of the tea into the glass.",
+                // "--policy.path=/home/ubuntu/edlsrobot/repos/ROS2_AC-one_Play/models/train/pour_tea_act/checkpoints/100000/pretrained_model"
+            
+            ]
+        }
+    ]
+}
