@@ -8,7 +8,8 @@
 
 # Local History for Visual Studio Code
 .history/
-
+time_logs/**
+lerobot
 # Built Visual Studio Code Extensions
 *.vsix
 
