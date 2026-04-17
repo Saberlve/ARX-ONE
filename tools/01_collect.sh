@@ -9,6 +9,16 @@ CAN_ROOT="${ARX_ROOT}/ARX_CAN/arx_can"
 ROS2_ROOT="${ARX_ROOT}/ROS2/X5_ws"
 JOY_ROOT="${ARX_ROOT}/arx_joy"
 REALSENSE_ROOT="${REPO_ROOT}/realsense"
+COLLECTOR_ROOT="${REPO_ROOT}/src/edlsrobot/datasets"
+COLLECT_PYTHON="${REPO_ROOT}/.venv_lerobot/bin/python"
+
+# LeRobot v2.1 collect settings. Edit these values directly when needed.
+LEROBOT_ROOT="${REPO_ROOT}/All_datas"
+LEROBOT_REPO_ID="pickXtimes_v21"
+LEROBOT_EPISODE_NUMS="2"
+LEROBOT_MAX_TIMESTEPS="1500"
+LEROBOT_FRAME_RATE="30"
+LEROBOT_TASK="Pick up the black pouch three times, then touch the green grommet"
 
 shell_type=${SHELL##*/}
 if [[ -z "${shell_type}" ]]; then
@@ -49,6 +59,11 @@ require_dir "${CAN_ROOT}"
 require_dir "${ROS2_ROOT}"
 require_dir "${JOY_ROOT}"
 require_dir "${REALSENSE_ROOT}"
+require_dir "${COLLECTOR_ROOT}"
+if [[ ! -x "${COLLECT_PYTHON}" ]]; then
+    echo "Missing collector python: ${COLLECT_PYTHON}" >&2
+    exit 1
+fi
 
 # CAN
 launch_terminal "can1" "cd '${CAN_ROOT}' && ./arx_can1.sh"
@@ -68,8 +83,7 @@ sleep 1
 launch_terminal "realsense" "cd '${REALSENSE_ROOT}' && ./realsense.sh"
 sleep 3
 
-
-# Collect
-# gnome-terminal --title="collect" -x $shell_type -i -c "cd ${workspace}; cd ../act; source /opt/ros/humble/setup.bash; source /home/ubuntu/edlsrobot/repos/ARX_X5/ROS2/X5_ws/install/setup.bash; source ./.venv_ros/bin/activate; python collect.py --episode_idx -1; $shell_exec"
+# Collect directly to LeRobot v2.1 format.
+launch_terminal "collect_lerobot_v21" "cd '${REPO_ROOT}' && source /opt/ros/humble/setup.bash && source '${ROS2_ROOT}/install/setup.bash' && '${COLLECT_PYTHON}' src/edlsrobot/datasets/collect_ledatav21.py --root_path '${LEROBOT_ROOT}' --repo_id '${LEROBOT_REPO_ID}' --episode_nums '${LEROBOT_EPISODE_NUMS}' --max_timesteps '${LEROBOT_MAX_TIMESTEPS}' --frame_rate '${LEROBOT_FRAME_RATE}' --task '${LEROBOT_TASK}'"
 
  

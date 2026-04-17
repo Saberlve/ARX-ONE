@@ -55,7 +55,7 @@ lerobot
 # .idea/modules
 # *.iml
 # *.ipr
-
+All_datas/**
 # CMake
 cmake-build-*/
 
@@ -137,6 +137,6 @@ qtcreator-*
 COLCON_IGNORE
 AMENT_IGNORE
 
-**/datasets
+# **/datasets
 **/weights
 **/test
