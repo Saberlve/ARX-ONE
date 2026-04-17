@@ -16,7 +16,7 @@ COLLECT_PYTHON="${REPO_ROOT}/.venv_lerobot/bin/python"
 LEROBOT_ROOT="${REPO_ROOT}/All_datas"
 LEROBOT_REPO_ID="pickXtimes_v21"
 LEROBOT_EPISODE_NUMS="2"
-LEROBOT_MAX_TIMESTEPS="1500"
+LEROBOT_MAX_TIMESTEPS="1000"
 LEROBOT_FRAME_RATE="30"
 LEROBOT_TASK="Pick up the black pouch three times, then touch the green grommet"
 

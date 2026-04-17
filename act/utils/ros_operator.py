@@ -33,6 +33,8 @@ from act.utils.controller import PIDController
 import time
 import math
 
+from act.utils.sync_utils import consume_nearest
+
 
 class Rate:
     def __init__(self, hz):
@@ -549,7 +551,14 @@ class RosOperator(Node):
     def _extract_eef_data(self, eef):
         return [eef.x, eef.y, eef.z, eef.roll, eef.pitch, eef.yaw]
 
-    def get_observation(self, ts=-1):  # get the robot observation
+    def _consume_nearest(self, deque_, target_ts, max_diff_ms=50.0):
+        max_diff_ns = int(max_diff_ms * 1e6)
+        return consume_nearest(deque_, target_ts=target_ts, max_diff_ns=max_diff_ns)
+
+    def get_observation(self, ts=-1, target_ts=None):  # get the robot observation
+        if target_ts is None:
+            target_ts = time.time_ns()
+
         img_data = {
             'head': None,
             'left_wrist': None,
@@ -580,16 +589,12 @@ class RosOperator(Node):
                     print(f'there is no {cam_name}_deque')
                     return None
 
-                # 是否压缩处理图像
-                cam_ts, cam_msg = deque_map[cam_name].pop() ##
+                selected = self._consume_nearest(deque_map[cam_name], target_ts)
+                if selected is None:
+                    print(f'{cam_name}_deque cannot match target_ts')
+                    return None
+                cam_ts, cam_msg = selected
                 img_ts[cam_name] = cam_ts
-                # # img_data[cam_name] = self.bridge.compressed_imgmsg_to_cv2(deque_map[cam_name].pop(),'passthrough') #颜色不对
-                # img_data[cam_name] = self.bridge.compressed_imgmsg_to_cv2(deque_map[cam_name].pop(),'rgb8')
-                ## add
-                # if self.args.is_compress:
-                #     img_data[cam_name] = self.bridge.compressed_imgmsg_to_cv2(deque_map[cam_name].pop(),'rgb8')
-                # else:
-                #     img_data[cam_name] = self.bridge.imgmsg_to_cv2(deque_map[cam_name].pop(),'rgb8')
                 if self.args.is_compress:
                     img_data[cam_name] = self.bridge.compressed_imgmsg_to_cv2(cam_msg, 'rgb8')
                 else:
@@ -624,8 +629,11 @@ class RosOperator(Node):
 
                 return None
 
-            # arm_data[arm_name] = deque_map[arm_name].pop()
-            arm_ts_ns, arm_msg = deque_map[arm_name].pop()  ##
+            selected = self._consume_nearest(deque_map[arm_name], target_ts)
+            if selected is None:
+                print(f'{arm_name}_deque cannot match target_ts')
+                return None
+            arm_ts_ns, arm_msg = selected
             arm_ts[arm_name] = arm_ts_ns    ##
             arm_data[arm_name] = arm_msg    ##
 
@@ -697,8 +705,11 @@ class RosOperator(Node):
 
         return obs_dict
 
-    def get_action(self):
+    def get_action(self, target_ts=None):
         joints_dim = 7
+
+        if target_ts is None:
+            target_ts = time.time_ns()
 
         action_dict = collections.OrderedDict()
 
@@ -713,11 +724,13 @@ class RosOperator(Node):
 
                 return None
 
-        # 获取主臂状态
-        # left_frame = deque_map['control_left_arm_deque'].pop()
-        # right_frame = deque_map['control_right_arm_deque'].pop()
-        _, left_frame = deque_map['control_left_arm_deque'].pop()   ##
-        _, right_frame = deque_map['control_right_arm_deque'].pop()
+        left_selected = self._consume_nearest(deque_map['control_left_arm_deque'], target_ts)
+        right_selected = self._consume_nearest(deque_map['control_right_arm_deque'], target_ts)
+        if left_selected is None or right_selected is None:
+            print('controller deque cannot match target_ts')
+            return None
+        _, left_frame = left_selected
+        _, right_frame = right_selected
 
         control_left_arm = left_frame.end_pos
         control_right_arm = right_frame.end_pos
@@ -789,10 +802,6 @@ class RosOperator(Node):
             self.controller_left_deque.popleft()
         self.controller_left_deque.append(item)
 
-        if len(self.feedback_left_arm_deque) >= 2000:
-            self.feedback_left_arm_deque.popleft()
-        self.feedback_left_arm_deque.append(item)
-
     # def controller_right_callback(self, msg):
     #     if len(self.controller_right_deque) >= 2000:
     #         self.controller_right_deque.popleft()
@@ -804,10 +813,6 @@ class RosOperator(Node):
         if len(self.controller_right_deque) >= 2000:
             self.controller_right_deque.popleft()
         self.controller_right_deque.append(item)
-
-        if len(self.feedback_right_arm_deque) >= 2000:
-            self.feedback_right_arm_deque.popleft()
-        self.feedback_right_arm_deque.append(item)
 
     # def feedback_left_callback(self, msg):
     #     if len(self.feedback_left_arm_deque) >= 2000:
@@ -926,4 +931,3 @@ class RosOperator(Node):
             return [0.0] * 7
         _, msg = self.feedback_right_arm_deque[-1]
         return list(msg.joint_pos)
-

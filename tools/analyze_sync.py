@@ -11,6 +11,11 @@ import numpy as np
 import pandas as pd
 
 
+def _short_name(col: str) -> str:
+    suffix = col.split(".")[-1]
+    return suffix[:-3] if suffix.endswith("_ns") else suffix
+
+
 def load_episode_parquet(root: Path, episode_index: int):
     """根据 info.json 里的 data_path 格式找到 episode 对应的 parquet 文件。"""
     info_path = root / "meta" / "info.json"
@@ -56,17 +61,26 @@ def analyze_episode(df: pd.DataFrame, fps: int, episode_index: int):
     print("\n【帧率稳定性】")
     sync_scores = []
     dt_stats = {}
+    duplicate_or_reverse_frames = {}
     for col in available_cols:
         arr = df[col].to_numpy().astype(np.int64).flatten()
         dts = np.diff(arr).astype(np.float64) / 1e6  # 纳秒 -> 毫秒
         dt_stats[col] = dts
+        duplicate_or_reverse = int(np.sum(dts <= 0.0))
+        duplicate_or_reverse_frames[col] = duplicate_or_reverse
         avg_dt = float(np.mean(dts))
         std_dt = float(np.std(dts))
         max_dt = float(np.max(dts))
         fps_actual = 1000.0 / avg_dt if avg_dt > 0 else 0
         over_threshold = int(np.sum(dts > target_dt + 15.0))
-        print(f"  {col.split('.')[-1]:20s} 平均fps={fps_actual:.1f} 平均dt={avg_dt:.1f}ms std={std_dt:.2f}ms 最大dt={max_dt:.1f}ms 超时帧={over_threshold}/{len(dts)}")
-        if std_dt < 3:
+        print(
+            f"  {col.split('.')[-1]:20s} 平均fps={fps_actual:.1f} 平均dt={avg_dt:.1f}ms "
+            f"std={std_dt:.2f}ms 最大dt={max_dt:.1f}ms 超时帧={over_threshold}/{len(dts)} "
+            f"重复/倒退={duplicate_or_reverse}/{len(dts)}"
+        )
+        if duplicate_or_reverse > 0:
+            sync_scores.append(0)
+        elif std_dt < 3:
             sync_scores.append(2)
         elif std_dt < 5:
             sync_scores.append(1)
@@ -95,13 +109,51 @@ def analyze_episode(df: pd.DataFrame, fps: int, episode_index: int):
     else:
         sync_scores.append(0)
 
-    # PART 2.5: action 与 state 之间的时间间隔
-    # 原理：collect_ledatav21.py 保存的是 (state_t, action_t+1)。
-    #       parquet 第 k 行的 sync_timestamp.left_arm_ns 是 state_t 的时间戳 ts_k；
-    #       而第 k 行的 action 实际上对应第 k+1 行的 ts_{k+1}。
-    #       因此 action-state 间隔 = np.diff(left_arm_ns)。
-    #       理想情况下这个间隔应严格等于 target_dt（如 33.3ms），
-    #       若 std 很大或平均值偏离 target_dt，说明 action 并不是真正的 "t+1 时刻"。
+    # PART 2.2: 拆分 pair-wise 偏差，定位究竟是 camera-camera 还是 camera-arm 为主
+    print("\n【Pair-wise 时间差】")
+    pair_diff_stats = {}
+    pair_groups = {
+        "camera-camera": [],
+        "camera-arm": [],
+        "arm-arm": [],
+    }
+    for i, col_a in enumerate(available_cols):
+        arr_a = df[col_a].to_numpy().astype(np.int64).flatten()
+        name_a = _short_name(col_a)
+        for col_b in available_cols[i + 1:]:
+            arr_b = df[col_b].to_numpy().astype(np.int64).flatten()
+            name_b = _short_name(col_b)
+            diff_ms = np.abs(arr_a - arr_b).astype(np.float64) / 1e6
+            key = f"{name_a}__{name_b}"
+            stats = {
+                "avg_ms": float(np.mean(diff_ms)),
+                "p95_ms": float(np.percentile(diff_ms, 95)),
+                "max_ms": float(np.max(diff_ms)),
+                "gt_10ms_frames": int(np.sum(diff_ms > 10.0)),
+            }
+            pair_diff_stats[key] = stats
+
+            if "arm" in name_a and "arm" in name_b:
+                pair_groups["arm-arm"].append((key, stats))
+            elif "arm" in name_a or "arm" in name_b:
+                pair_groups["camera-arm"].append((key, stats))
+            else:
+                pair_groups["camera-camera"].append((key, stats))
+
+    for group_name in ["camera-camera", "camera-arm", "arm-arm"]:
+        print(f"  {group_name}:")
+        for key, stats in sorted(pair_groups[group_name]):
+            print(
+                f"    {key:28s} avg={stats['avg_ms']:.2f}ms "
+                f"P95={stats['p95_ms']:.2f}ms max={stats['max_ms']:.1f}ms "
+                f">10ms={stats['gt_10ms_frames']}/{total_frames}"
+            )
+
+    # PART 2.5: 相邻保存帧之间的状态时间间隔
+    # 原理：这里仍然是对 sync_timestamp.left_arm_ns 做 np.diff()。
+    #       它反映的是 parquet 里相邻两条保存帧的状态时间间隔，
+    #       不是严格意义上的 “action-state 间隔”。
+    #       如果出现 0ms 或负值，通常意味着重复取到了旧帧，或者时间戳发生倒退。
     action_state_dt_ms = None
     if "sync_timestamp.left_arm_ns" in available_cols:
         arm_ts = df["sync_timestamp.left_arm_ns"].to_numpy().astype(np.int64).flatten()
@@ -110,11 +162,15 @@ def analyze_episode(df: pd.DataFrame, fps: int, episode_index: int):
         std_as_dt = float(np.std(action_state_dt_ms))
         max_as_dt = float(np.max(action_state_dt_ms))
         min_as_dt = float(np.min(action_state_dt_ms))
-        short_frames = int(np.sum(action_state_dt_ms < target_dt - 5.0))  # 明显小于 target_dt
-        print("\n【action 与 state 的时间间隔】")
+        short_frames = int(np.sum(action_state_dt_ms < target_dt - 5.0))
+        duplicate_or_reverse_as = int(np.sum(action_state_dt_ms <= 0.0))
+        print("\n【相邻保存帧之间的状态时间间隔】")
         print(f"  平均值={avg_as_dt:.2f}ms std={std_as_dt:.2f}ms 最小={min_as_dt:.1f}ms 最大={max_as_dt:.1f}ms")
         print(f"  间隔明显小于 {target_dt:.1f}ms 的帧: {short_frames}/{len(action_state_dt_ms)}")
-        if std_as_dt < 3 and abs(avg_as_dt - target_dt) < 3:
+        print(f"  重复/倒退时间戳: {duplicate_or_reverse_as}/{len(action_state_dt_ms)}")
+        if duplicate_or_reverse_as > 0:
+            sync_scores.append(0)
+        elif std_as_dt < 3 and abs(avg_as_dt - target_dt) < 3:
             sync_scores.append(2)
         elif std_as_dt < 5 and abs(avg_as_dt - target_dt) < 5:
             sync_scores.append(1)
@@ -142,7 +198,9 @@ def analyze_episode(df: pd.DataFrame, fps: int, episode_index: int):
     score = sum(sync_scores)
     max_score = len(sync_scores) * 2
     print(f"\n【综合评级】{score}/{max_score}", end=" ")
-    if score >= max_score - 1:
+    if avg_diff > 10.0 or p95_diff > 15.0:
+        print("=> 帧内跨模态偏差明显，不建议直接用于训练。")
+    elif score >= max_score - 1:
         print("=> 同步质量很好，可直接用于训练。")
     elif score >= max_score // 2:
         print("=> 同步基本可用，建议优化后再大规模采集。")
@@ -152,7 +210,9 @@ def analyze_episode(df: pd.DataFrame, fps: int, episode_index: int):
     return {
         "episode_index": episode_index,
         "dt_stats": dt_stats,
+        "duplicate_or_reverse_frames": duplicate_or_reverse_frames,
         "max_diff_ms": max_diff_ms,
+        "pair_diff_stats": pair_diff_stats,
         "action_state_dt_ms": action_state_dt_ms,
         "timestamp_ms": dts_lerobot,
     }
@@ -201,16 +261,16 @@ def plot_episode(result, fps: int, out_path: Path):
     ax.set_title("Cross-modality sync diff within same frame")
     ax.legend()
 
-    # SUBPLOT 3: action 与 state 的时间间隔
-    # 解读：黄色线应该紧贴黑线（target_dt）。如果黄色线忽高忽低或整体偏离黑线，
-    #       说明 action 并不是严格来自 "t+1 时刻"，而是被 pop() 机制随机拉近了/拉远了。
+    # SUBPLOT 3: 相邻保存帧之间的状态时间间隔
+    # 解读：黄色线应大致贴近黑线（target_dt）。如果出现 0ms 或负值，
+    #       往往说明重复取到旧帧或时间戳发生倒退。
     if action_state_dt_ms is not None:
         ax = axes[ax_idx]
         ax_idx += 1
-        ax.plot(frame_indices[1:], action_state_dt_ms, color="orange", alpha=0.8, label="action-state dt")
+        ax.plot(frame_indices[1:], action_state_dt_ms, color="orange", alpha=0.8, label="saved-frame dt")
         ax.axhline(target_dt, color="black", linestyle="--", linewidth=1, label=f"target ({target_dt:.1f}ms)")
         ax.set_ylabel("dt (ms)")
-        ax.set_title("Action-to-prev-state interval (should be ~target dt)")
+        ax.set_title("Saved-frame interval from left_arm timestamp")
         ax.legend()
 
     # SUBPLOT 4: LeRobot 自带 timestamp 的间隔

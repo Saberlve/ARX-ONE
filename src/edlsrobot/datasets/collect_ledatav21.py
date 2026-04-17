@@ -277,6 +277,7 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
     i = 0
     while (count < args.max_timesteps) and rclpy.ok() and not joy_key_3:
         loop_t0 = time.perf_counter()
+        target_ts = time.time_ns()
         #监听按键3,删除这个批次,
         with ros_operator.joy_lock:
             triggered = dict(ros_operator.triggered_joys)
@@ -287,13 +288,13 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
             voice_process(voice_engine, f"delete {episode_num}")
             break
         # STEP B: 从 ROS 队列里取观测(observation)和动作(action)
-        # 注意：ros_operator 内部对每个队列都是独立 pop() "最新"的一条，没有按时间戳对齐
-        # 这意味着 obs_dict 里的 head 图、left_wrist 图、right_arm 状态等可能来自不同时刻
+        # 采样锚点统一使用本轮循环开始时的 wall-clock target_ts，
+        # ros_operator 会在每个队列里取最接近该时刻的消息。
         t0 = time.perf_counter()
-        obs_dict = ros_operator.get_observation(ts=count)
+        obs_dict = ros_operator.get_observation(ts=count, target_ts=target_ts)
         t1 = time.perf_counter()
         # print(f"===========[get_observation] {(t1 - t0)*1000:.1f} ms")
-        action_dict = ros_operator.get_action()
+        action_dict = ros_operator.get_action(target_ts=target_ts)
 
         # 同步帧检测：如果任一队列暂时为空，就等待；连续 10 次为空则抛异常
         if obs_dict is None or action_dict is None:
