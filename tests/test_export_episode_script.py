@@ -27,8 +27,8 @@ class ExportEpisodeScriptTest(unittest.TestCase):
         self.assertIn(".venv_lerobot/bin/python", result.stdout)
         self.assertIn("export_lerobot_episode_to_excel.py", result.stdout)
         self.assertIn("All_datas/pour_tea100/data/chunk-000/episode_000009.parquet", result.stdout)
-        self.assertIn("-o '/tmp/episode_000009.xlsx'", result.stdout)
-        self.assertIn("--image-width '120'", result.stdout)
+        self.assertIn("-o /tmp/episode_000009.xlsx", result.stdout)
+        self.assertIn("--image-width 120", result.stdout)
 
 
 if __name__ == "__main__":

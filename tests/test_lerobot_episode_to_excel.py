@@ -103,17 +103,20 @@ class LerobotEpisodeToExcelTest(unittest.TestCase):
             sheet = workbook.active
             headers = [cell.value for cell in sheet[1]]
 
-            self.assertIn("observation.state_0", headers)
-            self.assertIn("observation.state_1", headers)
-            self.assertIn("action_0", headers)
-            self.assertIn("action_1", headers)
+            self.assertIn("observation.state", headers)
+            self.assertIn("action", headers)
             self.assertIn("observation.images.head", headers)
             self.assertIn("observation.images.left_wrist", headers)
 
             header_index = {name: idx + 1 for idx, name in enumerate(headers)}
-            self.assertEqual(sheet.cell(row=2, column=header_index["observation.state_0"]).value, 1.0)
-            self.assertEqual(sheet.cell(row=3, column=header_index["observation.state_1"]).value, 4.0)
-            self.assertAlmostEqual(sheet.cell(row=2, column=header_index["action_1"]).value, 0.2, places=6)
+            self.assertEqual(sheet.cell(row=2, column=header_index["observation.state"]).value, "[1.0, 2.0]")
+            self.assertEqual(sheet.cell(row=3, column=header_index["action"]).value, "[0.30000001192092896, 0.4000000059604645]")
+
+            self.assertIn("README", workbook.sheetnames)
+            readme = workbook["README"]
+            self.assertEqual(readme["A1"].value, "action dimension")
+            self.assertEqual(readme["B2"].value, "left_waist")
+            self.assertEqual(readme["A15"].value, "action[13]")
 
             with zipfile.ZipFile(output_path) as archive:
                 media_files = [name for name in archive.namelist() if name.startswith("xl/media/")]

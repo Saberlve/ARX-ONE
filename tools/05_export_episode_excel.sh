@@ -7,8 +7,8 @@ REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 EXPORT_PYTHON="${REPO_ROOT}/.venv_lerobot/bin/python"
 EXPORT_SCRIPT="${REPO_ROOT}/src/edlsrobot/datasets/export_lerobot_episode_to_excel.py"
 
-LEROBOT_EPISODE_PATH="${LEROBOT_EPISODE_PATH:-${REPO_ROOT}/All_datas/pour_tea100/data/chunk-000/episode_000009.parquet}"
-LEROBOT_EXPORT_OUTPUT="${LEROBOT_EXPORT_OUTPUT:-${REPO_ROOT}/outputs/episode_000009.xlsx}"
+LEROBOT_EPISODE_PATH="${LEROBOT_EPISODE_PATH:-/home/ubuntu/edlsrobot/repos/ROS2_AC-one_Play-wsx/All_datas/pickXtimes_v21/data/chunk-000/episode_000002.parquet}"
+LEROBOT_EXPORT_OUTPUT="${LEROBOT_EXPORT_OUTPUT:-${REPO_ROOT}/outputs/episode_000001.xlsx}"
 LEROBOT_IMAGE_WIDTH="${LEROBOT_IMAGE_WIDTH:-160}"
 
 require_file() {

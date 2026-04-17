@@ -63,6 +63,9 @@ if pyttsx3 is not None:
 voice_lock = threading.Lock()
 joy_key_3 = False
 
+GRIPPER_IDXS = (6, 13)
+GRIPPER_CLOSE = -0.5
+
 
 def load_yaml(yaml_file):
     try:
@@ -84,6 +87,17 @@ def voice_process(voice_engine, line):
     print(line)
 
     return
+
+
+def normalize_gripper_state(
+    state: np.ndarray,
+    gripper_close: float = GRIPPER_CLOSE,
+    gripper_idxs: tuple[int, int] = GRIPPER_IDXS,
+) -> np.ndarray:
+    normalized = deepcopy(np.asarray(state, dtype=np.float32))
+    for idx in gripper_idxs:
+        normalized[idx] = 0.0 if normalized[idx] > gripper_close else normalized[idx]
+    return normalized
 
 @dataclasses.dataclass(frozen=True)
 class DatasetConfig:
@@ -229,7 +243,7 @@ def collect_detect(args, start_episode, voice_engine, ros_operator):
                 continue
 
             # action = obs_dict['eef']
-            action = obs_dict['qpos']
+            action = normalize_gripper_state(obs_dict['qpos'])
 
             # 减少不必要的循环
             with ros_operator.joy_lock:
@@ -257,8 +271,6 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
     rate = Rate(args.frame_rate)
     # 初始化机器人基础位置
     # ros_operator.init_robot_base_pose()
-    gripper_idx = [6, 13]
-    gripper_close = -0.5    # left开最大-3.425, right开最大 -3.323；
     global joy_key_3
     
     # prev_* 用来保存上一帧的数据，最终构成 (state_t, image_t, action_t+1) 的训练样本
@@ -361,16 +373,11 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
             break
 
         # STEP G: 提取当前从臂状态（将被用作下一帧的 action）
-        curr_state = deepcopy(obs_dict["qpos"].astype(np.float32))
+        curr_state = normalize_gripper_state(obs_dict["qpos"])
         curr_vel = deepcopy(obs_dict["qvel"].astype(np.float32))
         curr_effort = deepcopy(obs_dict["effort"].astype(np.float32))
         if args.use_eef:
-            curr_eef = deepcopy(obs_dict["eff"].astype(np.float32))
-        # 夹爪动作处理
-        for idx in gripper_idx:
-            curr_state[idx] = 0 if curr_state[idx] > gripper_close else curr_state[idx]
-            if args.use_eef:
-                curr_eef[idx] = 0 if curr_eef[idx] > gripper_close else curr_eef[idx]
+            curr_eef = normalize_gripper_state(obs_dict["eff"])
 
         # 检查是否超过100帧，并判断是否应该停止
         if count > 100:
