@@ -293,18 +293,18 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
         t0 = time.perf_counter()
         obs_dict = ros_operator.get_observation(ts=count, target_ts=target_ts)
         t1 = time.perf_counter()
-        # print(f"===========[get_observation] {(t1 - t0)*1000:.1f} ms")
-        action_dict = ros_operator.get_action(target_ts=target_ts)
+        # 直接拖动机械臂采集时，训练标签来自相邻两帧 feedback state，
+        # 不依赖 controller/action topic。
 
-        # 同步帧检测：如果任一队列暂时为空，就等待；连续 10 次为空则抛异常
-        if obs_dict is None or action_dict is None:
+        # 同步帧检测：如果 observation 暂时为空，就等待；连续 10 次为空则抛异常
+        if obs_dict is None:
             print("Synchronization frame")
             rate.sleep()
             i += 1
             if i > 10:
-                print("no camera queue !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+                print("no observation queue !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
                 dataset.clear_episode_buffer()
-                raise RuntimeError("Camera/action queue timeout")
+                raise RuntimeError("Observation queue timeout")
             continue
 
         # STEP C: 提取当前循环拿到的各模态原始 ROS 时间戳（单位：纳秒）

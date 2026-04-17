@@ -99,6 +99,8 @@ class RosOperator(Node):
         self.last_joy = [0, 0, 0, 0]
         self.triggered_joys = {}
         self.joy_lock = threading.Lock()
+        self._feedback_fallback_warned = set()
+        self._arm_observation_source = {}
 
         self.pos_cmd = PosCmd
         self.joint_control = JointControl
@@ -555,6 +557,35 @@ class RosOperator(Node):
         max_diff_ns = int(max_diff_ms * 1e6)
         return consume_nearest(deque_, target_ts=target_ts, max_diff_ns=max_diff_ns)
 
+    def _consume_arm_observation(self, arm_name, target_ts):
+        feedback_map = {
+            'left_arm': self.feedback_left_arm_deque,
+            'right_arm': self.feedback_right_arm_deque,
+        }
+        controller_map = {
+            'left_arm': self.controller_left_deque,
+            'right_arm': self.controller_right_deque,
+        }
+
+        source = self._arm_observation_source.get(arm_name)
+
+        if source is None:
+            if len(feedback_map[arm_name]) > 0:
+                source = "feedback"
+            elif len(controller_map[arm_name]) > 0:
+                source = "controller"
+                if arm_name not in self._feedback_fallback_warned:
+                    print(f'Warning: {arm_name} feedback queue empty, use controller queue as observation source')
+                    self._feedback_fallback_warned.add(arm_name)
+            else:
+                return None
+
+            self._arm_observation_source[arm_name] = source
+
+        if source == "feedback":
+            return self._consume_nearest(feedback_map[arm_name], target_ts)
+        return self._consume_nearest(controller_map[arm_name], target_ts)
+
     def get_observation(self, ts=-1, target_ts=None):  # get the robot observation
         if target_ts is None:
             target_ts = time.time_ns()
@@ -619,19 +650,9 @@ class RosOperator(Node):
 
         # 获取机械臂状态
         for arm_name in ['left_arm', 'right_arm']:
-            deque_map = {
-                'left_arm': self.feedback_left_arm_deque,
-                'right_arm': self.feedback_right_arm_deque,
-            }
-
-            if len(deque_map[arm_name]) == 0:
-                print(f'there is no {arm_name}_deque')
-
-                return None
-
-            selected = self._consume_nearest(deque_map[arm_name], target_ts)
+            selected = self._consume_arm_observation(arm_name, target_ts)
             if selected is None:
-                print(f'{arm_name}_deque cannot match target_ts')
+                print(f'there is no {arm_name}_deque')
                 return None
             arm_ts_ns, arm_msg = selected
             arm_ts[arm_name] = arm_ts_ns    ##
