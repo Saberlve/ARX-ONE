@@ -30,23 +30,6 @@ openpyxl = _require_dependency("openpyxl", "pip install openpyxl")
 PIL_Image = _require_dependency("PIL.Image", "pip install pillow")
 OpenpyxlImage = _require_dependency("openpyxl.drawing.image", "pip install openpyxl").Image
 
-ACTION_DIM_NAMES = [
-    "left_waist",
-    "left_shoulder",
-    "left_elbow",
-    "left_forearm_roll",
-    "left_wrist_angle",
-    "left_wrist_rotate",
-    "left_gripper",
-    "right_waist",
-    "right_shoulder",
-    "right_elbow",
-    "right_forearm_roll",
-    "right_wrist_angle",
-    "right_wrist_rotate",
-    "right_gripper",
-]
-
 
 def _load_info(dataset_root: Path) -> dict[str, Any]:
     info_path = dataset_root / "meta" / "info.json"
@@ -114,13 +97,13 @@ def _flatten_cell(prefix: str, value: Any) -> dict[str, Any]:
         if value.ndim == 1:
             if value.shape[0] == 1:
                 return {prefix: _normalize_scalar(value[0])}
-            return {prefix: json.dumps(np.asarray(value).tolist(), ensure_ascii=False)}
+            return {f"{prefix}_{idx}": _normalize_scalar(item) for idx, item in enumerate(value.tolist())}
         return {prefix: json.dumps(np.asarray(value).tolist(), ensure_ascii=False)}
 
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         if len(value) == 1:
             return {prefix: _normalize_scalar(value[0])}
-        return {prefix: json.dumps(list(value), ensure_ascii=False, default=str)}
+        return {f"{prefix}_{idx}": _normalize_scalar(item) for idx, item in enumerate(value)}
 
     if isinstance(value, Mapping):
         return {prefix: json.dumps(dict(value), ensure_ascii=False, default=str)}
@@ -263,15 +246,6 @@ def _set_basic_layout(sheet, header_count: int, row_count: int) -> None:
         sheet.row_dimensions[row_idx].height = 90
 
 
-def _write_action_readme_sheet(workbook) -> None:
-    sheet = workbook.create_sheet("README")
-    sheet.append(["action dimension", "meaning"])
-    for idx, name in enumerate(ACTION_DIM_NAMES):
-        sheet.append([f"action[{idx}]", name])
-    sheet.column_dimensions["A"].width = 18
-    sheet.column_dimensions["B"].width = 24
-
-
 def export_episode_to_excel(
     episode_path: str | Path,
     output_path: str | Path | None = None,
@@ -335,7 +309,6 @@ def export_episode_to_excel(
                 sheet.add_image(image, f"{openpyxl.utils.get_column_letter(image_col_idx)}{row_idx}")
 
         _set_basic_layout(sheet, len(headers), len(flattened_rows))
-        _write_action_readme_sheet(workbook)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         workbook.save(output_path)
 

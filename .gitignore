@@ -136,7 +136,7 @@ qtcreator-*
 # Colcon custom files
 COLCON_IGNORE
 AMENT_IGNORE
-
+outputs/**
 # **/datasets
 **/weights
 **/test
