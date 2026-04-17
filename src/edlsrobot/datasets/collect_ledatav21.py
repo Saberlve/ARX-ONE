@@ -152,7 +152,8 @@ def create_empty_dataset(args,
 
     cameras = args.camera_names
 
-    # 用于事后分析同步质量的原始时间戳（不参与训练）
+    # STEP A: 添加 "sync_timestamp.*" 特征到 LeRobot 数据集元数据
+    # 这些字段不会参与模型训练，只用于事后分析：一帧内 head/left_wrist/right_wrist/left_arm/right_arm 的 ROS 原始时间戳是否对齐
     for cam in cameras:
         features[f"sync_timestamp.{cam}_ns"] = {"dtype": "int64", "shape": (1,)}
     features["sync_timestamp.left_arm_ns"] = {"dtype": "int64", "shape": (1,)}
@@ -260,9 +261,11 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
     gripper_close = -0.5    # left开最大-3.425, right开最大 -3.323；
     global joy_key_3
     
+    # prev_* 用来保存上一帧的数据，最终构成 (state_t, image_t, action_t+1) 的训练样本
     prev_state, prev_vel, prev_effort = None, None, None
     prev_head_ts, prev_left_ts, prev_right_ts = None, None, None
     prev_left_arm_ts, prev_right_arm_ts = None, None
+    # last_* 只用于检测当前帧相比上一帧的时间间隔是否跳帧/超时
     last_head_ts = None
     last_left_ts = None
     last_right_ts = None
@@ -283,14 +286,16 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
             joy_key_3 = True
             voice_process(voice_engine, f"delete {episode_num}")
             break
-        # get observation
+        # STEP B: 从 ROS 队列里取观测(observation)和动作(action)
+        # 注意：ros_operator 内部对每个队列都是独立 pop() "最新"的一条，没有按时间戳对齐
+        # 这意味着 obs_dict 里的 head 图、left_wrist 图、right_arm 状态等可能来自不同时刻
         t0 = time.perf_counter()
         obs_dict = ros_operator.get_observation(ts=count)
         t1 = time.perf_counter()
         # print(f"===========[get_observation] {(t1 - t0)*1000:.1f} ms")
         action_dict = ros_operator.get_action()
-        
-        # 同步帧检测
+
+        # 同步帧检测：如果任一队列暂时为空，就等待；连续 10 次为空则抛异常
         if obs_dict is None or action_dict is None:
             print("Synchronization frame")
             rate.sleep()
@@ -300,12 +305,16 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
                 dataset.clear_episode_buffer()
                 raise RuntimeError("Camera/action queue timeout")
             continue
-        # ##
+
+        # STEP C: 提取当前循环拿到的各模态原始 ROS 时间戳（单位：纳秒）
+        # 这些时间戳来自 ros_operator 内部队列的 pop()，天然可能存在跨模态时间差
         curr_head_ts = obs_dict["img_ts"]["head"]
         curr_left_ts = obs_dict["img_ts"]["left_wrist"]
         curr_right_ts = obs_dict["img_ts"]["right_wrist"]
         curr_left_arm_ts = obs_dict["arm_ts"]["left_arm"]
         curr_right_arm_ts = obs_dict["arm_ts"]["right_arm"]
+        # STEP D: 计算相邻两帧之间同一模态的时间间隔 dt，用于检测跳帧/超时
+        # 例如 head_dt_ms = 44.5 表示 head 相机这两帧之间间隔了 44.5ms，大于 33.3ms 说明有跳帧
         head_dt_ms = None
         left_dt_ms = None
         right_dt_ms = None
@@ -313,7 +322,6 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
         right_arm_dt_ms = None
         if last_head_ts is not None:
             head_dt_ms = (curr_head_ts - last_head_ts) / 1e6
-            # print(f"_________[head dt] {head_dt_ms:.1f} ms")
         if last_left_ts is not None:
             left_dt_ms = (curr_left_ts - last_left_ts) / 1e6
         if last_right_ts is not None:
@@ -323,11 +331,14 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
         if last_right_arm_ts is not None:
             right_arm_dt_ms = (curr_right_arm_ts - last_right_arm_ts) / 1e6
 
+        # 更新 last_* 供下一帧计算 dt 使用
         last_head_ts = curr_head_ts
         last_left_ts = curr_left_ts
         last_right_ts = curr_right_ts
         last_left_arm_ts = curr_left_arm_ts
         last_right_arm_ts = curr_right_arm_ts
+
+        # STEP E: 把本帧的时间日志写入 time_records（仅用于事后 human 查看，分析脚本现在读 parquet）
         time_records.append({
             "frame_index": int(count),
             "head_ts_ns": int(curr_head_ts),
@@ -338,23 +349,17 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
             "right_arm_dt_ms": None if right_arm_dt_ms is None else float(right_arm_dt_ms),
             "get_observation_ms": float((t1 - t0) * 1000.0),
         })
-        '''---数据跳帧，机械臂超时，偶发,可能是资源竞争导致。删除该批次。一般=1/frame_rate
-            head_dt_ms      = 44.511475
-            left_dt_ms      = 44.511475
-            right_dt_ms     = 44.511719
-            left_arm_dt_ms  = 44.999169
-            right_arm_dt_ms = 44.998256
-            find "time_logs" file.
-        ---'''
+        # STEP F: 超时检测
+        # 如果某一模态的 dt 超过 threshold（例如 30fps 下是 48.3ms），认为发生了严重跳帧，丢弃本 episode
         dt_list = [head_dt_ms, left_dt_ms, right_dt_ms, left_arm_dt_ms, right_arm_dt_ms]
-        # Allow modest scheduling jitter around the target frame interval.
         dt_threshold_ms = (1000.0 / args.frame_rate) + 15.0
         if any(x is not None and x > dt_threshold_ms for x in dt_list):
             joy_key_3 = True
             print(f"---------timeout (threshold={dt_threshold_ms:.1f} ms): ", dt_list)
             voice_process(voice_engine, f"timeout, delete {episode_num}")
             break
-        
+
+        # STEP G: 提取当前从臂状态（将被用作下一帧的 action）
         curr_state = deepcopy(obs_dict["qpos"].astype(np.float32))
         curr_vel = deepcopy(obs_dict["qvel"].astype(np.float32))
         curr_effort = deepcopy(obs_dict["effort"].astype(np.float32))
@@ -372,22 +377,27 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
                 print("------------------------ collect over ---------------------------------")
                 break   #回到初始位置，提前结束收集。
         
+        # STEP H: 构造训练样本 frame。注意这里使用的是 "prev_*"（上一帧的数据）作为 observation，
+        # 而 "curr_state"（当前帧的从臂状态）作为 action。
+        # 这是一种 (state_t, image_t, action_t+1) 的保存方式，常用于 Diffusion Policy / ACT。
+        # 这意味着 action 和 observation 之间存在一个固定步长的时序偏移。
         if prev_state is not None:
-            # 这里的“动作”定义为下一时刻的状态
             frame = {
-                "observation.state": prev_state,
-                "observation.velocity": prev_vel,
-                "observation.effort": prev_effort,
-                "action": curr_state,
-                "observation.images.head": prev_image_head,
+                "observation.state": prev_state,              # t 时刻的从臂状态
+                "observation.velocity": prev_vel,             # t 时刻的速度
+                "observation.effort": prev_effort,            # t 时刻的电流
+                "action": curr_state,                         # t+1 时刻的从臂状态（作为动作标签）
+                "observation.images.head": prev_image_head,   # t 时刻的图像
                 "observation.images.left_wrist": prev_image_left,
                 "observation.images.right_wrist": prev_image_right,
+                # 下面 5 个 sync_timestamp 记录的是 t 时刻各模态的 ROS 原始时间戳，
+                # 用于事后分析 "同一帧内 head 图和 left_arm 状态到底差了多少毫秒"
                 "sync_timestamp.head_ns": np.array([prev_head_ts], dtype=np.int64),
                 "sync_timestamp.left_wrist_ns": np.array([prev_left_ts], dtype=np.int64),
                 "sync_timestamp.right_wrist_ns": np.array([prev_right_ts], dtype=np.int64),
                 "sync_timestamp.left_arm_ns": np.array([prev_left_arm_ts], dtype=np.int64),
                 "sync_timestamp.right_arm_ns": np.array([prev_right_arm_ts], dtype=np.int64),
-            }   # 保存 (state_t, action_t+1)
+            }
             # add task
             frame["task"] = args.task
             #
@@ -408,6 +418,7 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
             t_add1 = time.perf_counter()
             # print(f"------[add_frame] {(t_add1 - t_add0)*1000:.1f} ms")
 
+        # STEP I: 把当前帧的数据存储为 prev_*，供下一循环构造 (state_t, action_t+1) 使用
         prev_state = curr_state
         prev_vel = curr_vel
         prev_effort = curr_effort
@@ -416,7 +427,6 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
         prev_right_ts = curr_right_ts
         prev_left_arm_ts = curr_left_arm_ts
         prev_right_arm_ts = curr_right_arm_ts
-        # rgb camera
         prev_image_head = obs_dict["images"]["head"]
         prev_image_left = obs_dict["images"]["left_wrist"]
         prev_image_right = obs_dict["images"]["right_wrist"]
@@ -539,8 +549,8 @@ def parse_arguments(known=False):
     parser.add_argument('--episode_nums', type=int, default=100, help='episode nums')
     parser.add_argument('--max_timesteps', type=int, default=1500, help='max timesteps')   #800
     parser.add_argument('--frame_rate', type=int, default=30, help='frame rate')
-    parser.add_argument('--use_vel', type=bool, default=True, help='use joint velocity')
-    parser.add_argument('--use_effort', type=bool, default=True, help='use joint effort')
+    parser.add_argument('--use_vel', type=bool, default=False, help='use joint velocity')
+    parser.add_argument('--use_effort', type=bool, default=False, help='use joint effort')
     parser.add_argument('--use_eef', type=bool, default=False, help='use gripper eef')
 
     # 配置文件
