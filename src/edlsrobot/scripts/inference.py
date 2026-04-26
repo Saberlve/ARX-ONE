@@ -89,6 +89,8 @@ from lerobot.utils.utils import (
     get_safe_torch_device,
     init_logging,
 )
+from openpi_client_adapter import build_openpi_arx_observation
+from openpi_client_adapter import select_first_openpi_action
 
 logger = logging.getLogger(__name__)
 obs_dict = collections.OrderedDict()
@@ -160,6 +162,12 @@ class InferenceConfig:
     play_sounds: bool = False
     # Resume recording on an existing dataset.
     resume: bool = False
+    # Query an OpenPI websocket policy server instead of loading a local LeRobot policy.
+    use_openpi_server: bool = False
+    # Hostname or IP address of the OpenPI websocket policy server.
+    openpi_server_host: str = "localhost"
+    # Port of the OpenPI websocket policy server.
+    openpi_server_port: int = 8000
 
     def __post_init__(self):
         # HACK: We parse again the cli args here to get the pretrained path if there was one.
@@ -169,8 +177,8 @@ class InferenceConfig:
             self.policy = PreTrainedConfig.from_pretrained(policy_path, cli_overrides=cli_overrides)
             self.policy.pretrained_path = policy_path
 
-        if self.teleop is None and self.policy is None:
-            raise ValueError("Choose a policy, a teleoperator or both to control the robot")
+        if self.teleop is None and self.policy is None and not self.use_openpi_server:
+            raise ValueError("Choose a policy, a teleoperator, or an OpenPI server to control the robot")
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:
@@ -459,6 +467,16 @@ def init_infer_engine(cfg: InferenceConfig):
     # if cfg.display_data:
     #     init_rerun(session_name="recording")
 
+    if cfg.use_openpi_server:
+        from openpi_client import websocket_client_policy
+
+        return {
+            "openpi_client": websocket_client_policy.WebsocketClientPolicy(
+                host=cfg.openpi_server_host,
+                port=cfg.openpi_server_port,
+            ),
+        }
+
     robot = make_robot_from_config(cfg.robot)
 
     teleop_action_processor, robot_action_processor, robot_observation_processor = make_default_processors()
@@ -538,6 +556,7 @@ def init_infer_engine(cfg: InferenceConfig):
         "postprocessor": postprocessor,
         "robot_observation_processor": robot_observation_processor,
         "device": device,
+        "openpi_client": None,
         }
 
 def infer_step(engine, cfg: InferenceConfig, obs: dict):
@@ -640,23 +659,21 @@ def inference_process(cfg, shm_dict, shapes, ros_proc, action_queue):
             "observation.images.left_wrist": (obs_dict["images"]["left_wrist"]),
             "observation.images.right_wrist": (obs_dict["images"]["right_wrist"]),
         }
-        # observation = {
-        #     "observation.state": (obs_dict["qpos"]),
-        #     "observation.velocity": (obs_dict["qvel"]),
-        #     "observation.effort": (obs_dict["effort"]),
-        #     "observation.images.camera1": (obs_dict["images"]["head"]),
-        #     "observation.images.camera2": (obs_dict["images"]["left_wrist"]),
-        #     "observation.images.camera3": (obs_dict["images"]["right_wrist"]),
-        # }   ## only smolvla
+
 
         # 远程推理
         inference_start = time.time()
-        results = infer_step(engine, cfg, observation)
+        if engine["openpi_client"] is not None:
+            openpi_observation = build_openpi_arx_observation(obs_dict, cfg.dataset.single_task)
+            results = engine["openpi_client"].infer(openpi_observation)
+            action = select_first_openpi_action(results)
+        else:
+            results = infer_step(engine, cfg, observation)
+            action = results.squeeze().numpy()
         client_infer_ms = 1000 * (time.time() - inference_start)
         print("client_infer_ms: ", client_infer_ms)
 
         # 执行动作
-        action = results.squeeze().numpy()
         # print("+++++++++++++++++++++  ", action)
         # time.sleep(1)
         robot_action(action, action_queue)

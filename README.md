@@ -40,6 +40,24 @@ ACone项目文件环境配置,参考文档:https://alidocs.dingtalk.com/i/nodes/
 	cd ./src/edlsrobot/scripts
 	bash infer.sh
 
+1.4 OpenPi 推理 (Remote Inference)
+**模型服务器端**，运行 OpenPi 的 `pi05_arx`：
+```bash
+uv run scripts/serve_policy.py policy:checkpoint \
+  --policy.config=pi05_arx \
+  --policy.dir=/path/to/openpi/checkpoint \
+  --port=8000 \
+  --default-prompt="Pick up the black pouch three times, then touch the green grommet"
+```
+
+**真机端**：
+```bash
+RIGHT_WRIST_CAMERA=/dev/video12 \
+TASK_PROMPT="Pick up the black pouch three times, then touch the green grommet" \
+OPENPI_HOST=192.168.1.10 \
+bash infer_openpi.sh
+```
+验证已跑通。
 
 
 2.update ...
