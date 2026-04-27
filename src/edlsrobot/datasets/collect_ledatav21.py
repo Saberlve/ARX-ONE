@@ -99,6 +99,23 @@ def normalize_gripper_state(
         normalized[idx] = 0.0 if normalized[idx] > gripper_close else normalized[idx]
     return normalized
 
+
+def drop_last_episode_buffer_frame(episode_buffer: dict) -> bool:
+    """Drop the final buffered sample while leaving already written image files untouched."""
+    size = int(episode_buffer.get("size", 0))
+    if size <= 1:
+        return False
+
+    for key, value in episode_buffer.items():
+        if key == "size":
+            continue
+        if isinstance(value, list) and len(value) == size:
+            value.pop()
+
+    episode_buffer["size"] = size - 1
+    return True
+
+
 @dataclasses.dataclass(frozen=True)
 class DatasetConfig:
     use_videos: bool = True
@@ -470,6 +487,8 @@ def collect_and_save(args, dataset, ros_operator, voice_engine, episode_num):
     else:
         # save
         save_episode_time_records("./time_logs", episode_num, time_records)
+        if drop_last_episode_buffer_frame(dataset.episode_buffer):
+            print("Dropped final buffered frame before save to avoid video tail timestamp mismatch.")
         dataset.save_episode()
         voice_process(voice_engine, f"Save {episode_num}")
         print(f"\033[32m\nSaved {episode_num} !!!!!! \033[0m\n")
