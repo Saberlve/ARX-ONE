@@ -375,11 +375,17 @@ def ros_process(args, meta_queue, connected_event, start_event, shm_ready_event,
     #     while rclpy.ok():
     #         rclpy.spin_once(node, timeout_sec=0.001)
     def _spin_loop(node):
+        print("[DEBUG] _spin_loop started")
         try:
+            spin_count = 0
             while rclpy.ok():
                 rclpy.spin_once(node, timeout_sec=0.001)
+                spin_count += 1
+                if spin_count <= 5 or spin_count % 500 == 0:
+                    print(f"[DEBUG] spin_once count={spin_count}, left_deque={len(node.feedback_left_arm_deque)}")
+            print(f"[DEBUG] _spin_loop exited, rclpy.ok()={rclpy.ok()}, spin_count={spin_count}")
         except ExternalShutdownException:
-            pass
+            print("[DEBUG] _spin_loop ExternalShutdownException")
         except Exception as e:
             print(f"_spin_loop exception: {e}")
 
@@ -721,7 +727,7 @@ def main(cfg: InferenceConfig):
     ros_proc.start()
 
     connected_event.wait()
-    input("Enter any key to continue :")
+    print("Robot connected, starting inference...")
     start_event.set()
 
     # 等待meta信息

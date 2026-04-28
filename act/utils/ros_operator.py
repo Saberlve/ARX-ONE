@@ -475,6 +475,9 @@ class RosOperator(Node):
 
         #     if left_arm is not None and right_arm is not None:
         #         break
+        print(f"[DEBUG] Waiting for arm feedback... left_deque={len(self.feedback_left_arm_deque)} right_deque={len(self.feedback_right_arm_deque)} rclpy_ok={rclpy.ok()}")
+        wait_start = time.time()
+        last_wait_log = wait_start
         while rclpy.ok():
             if len(self.feedback_left_arm_deque) != 0:
                 _, left_msg = self.feedback_left_arm_deque[-1]
@@ -485,7 +488,19 @@ class RosOperator(Node):
                 right_arm = list(right_msg.joint_pos)
 
             if left_arm is not None and right_arm is not None:
+                print(f"[DEBUG] Got both arms! left={left_arm[:3]}...")
                 break
+
+            now = time.time()
+            if now - last_wait_log >= 2.0:
+                print(
+                    "[DEBUG] Still waiting for arm feedback... "
+                    f"elapsed={now - wait_start:.1f}s "
+                    f"left_deque={len(self.feedback_left_arm_deque)} "
+                    f"right_deque={len(self.feedback_right_arm_deque)}"
+                )
+                last_wait_log = now
+            time.sleep(0.001)
 
         # 计算方向标志位
         left_symbol = [1 if left_target[i] - left_arm[i] > 0 else -1 for i in range(len(left_target))]
@@ -840,6 +855,7 @@ class RosOperator(Node):
     #         self.feedback_left_arm_deque.popleft()
     #     self.feedback_left_arm_deque.append(msg)
     def feedback_left_callback(self, msg):
+        print(f"[DEBUG] feedback_left_callback called, joint_pos={msg.joint_pos}")
         if len(self.feedback_left_arm_deque) >= 2000:
             self.feedback_left_arm_deque.popleft()
         self.feedback_left_arm_deque.append((self._msg_time_ns(msg), msg))
