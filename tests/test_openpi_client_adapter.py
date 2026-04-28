@@ -10,6 +10,8 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from openpi_client_adapter import build_openpi_arx_observation
+from openpi_client_adapter import check_arx_action_safety
+from openpi_client_adapter import ActionSafetyError
 from openpi_client_adapter import select_first_openpi_action
 
 
@@ -54,3 +56,33 @@ def test_select_first_openpi_action_rejects_missing_actions():
 def test_select_first_openpi_action_rejects_empty_chunk():
     with pytest.raises(ValueError, match="empty"):
         select_first_openpi_action({"actions": np.empty((0, 14), dtype=np.float32)})
+
+
+def test_check_arx_action_safety_allows_small_joint_steps():
+    qpos = np.zeros(14, dtype=np.float32)
+    action = np.zeros(14, dtype=np.float32)
+    action[1] = 0.02
+    action[7] = -0.03
+    action[13] = -0.5
+
+    checked = check_arx_action_safety(action, qpos, max_joint_step=0.05, max_gripper_step=1.0)
+
+    np.testing.assert_array_equal(checked, action)
+
+
+def test_check_arx_action_safety_rejects_large_joint_step():
+    qpos = np.zeros(14, dtype=np.float32)
+    action = np.zeros(14, dtype=np.float32)
+    action[8] = 0.2
+
+    with pytest.raises(ActionSafetyError, match="joint step"):
+        check_arx_action_safety(action, qpos, max_joint_step=0.05, max_gripper_step=1.0)
+
+
+def test_check_arx_action_safety_rejects_nonfinite_action():
+    qpos = np.zeros(14, dtype=np.float32)
+    action = np.zeros(14, dtype=np.float32)
+    action[0] = np.nan
+
+    with pytest.raises(ActionSafetyError, match="finite"):
+        check_arx_action_safety(action, qpos, max_joint_step=0.05, max_gripper_step=1.0)

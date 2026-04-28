@@ -90,6 +90,8 @@ from lerobot.utils.utils import (
     init_logging,
 )
 from openpi_client_adapter import build_openpi_arx_observation
+from openpi_client_adapter import check_arx_action_safety
+from openpi_client_adapter import ActionSafetyError
 from openpi_client_adapter import select_first_openpi_action
 
 logger = logging.getLogger(__name__)
@@ -366,6 +368,8 @@ def ros_process(args, meta_queue, connected_event, start_event, shm_ready_event,
 
     data = load_yaml(args.data)
     ros_operator = RosOperator(args, data, in_collect=False)
+    max_safe_joint_step = float(os.environ.get("ARX_MAX_SAFE_JOINT_STEP", "0.08"))
+    max_safe_gripper_step = float(os.environ.get("ARX_MAX_SAFE_GRIPPER_STEP", "1.25"))
 
     # def _spin_loop(node):
     #     while rclpy.ok():
@@ -438,6 +442,7 @@ def ros_process(args, meta_queue, connected_event, start_event, shm_ready_event,
         if  np.any(action):  # 确保动作不全是 0
             gripper_gate = args.gripper_gate
             gripper_idx = [6, 13]
+            action = np.asarray(action, dtype=np.float32).copy()
 
             left_action = action[:gripper_idx[0] + 1]  # 取8维度
             if gripper_gate != -1:
@@ -446,6 +451,19 @@ def ros_process(args, meta_queue, connected_event, start_event, shm_ready_event,
             right_action = action[gripper_idx[0] + 1:gripper_idx[1] + 1]
             if gripper_gate != -1:
                 right_action[gripper_idx[0]] = apply_gripper_gate(right_action[gripper_idx[0]], gripper_gate)
+
+            try:
+                check_arx_action_safety(
+                    action,
+                    obs["qpos"],
+                    max_joint_step=max_safe_joint_step,
+                    max_gripper_step=max_safe_gripper_step,
+                )
+            except ActionSafetyError as exc:
+                print(f"[SAFETY STOP] {exc}")
+                hold_qpos = np.asarray(obs["qpos"], dtype=np.float32)
+                ros_operator.follow_arm_publish(hold_qpos[:7], hold_qpos[7:14])
+                break
 
             ros_operator.follow_arm_publish(left_action, right_action)
 
