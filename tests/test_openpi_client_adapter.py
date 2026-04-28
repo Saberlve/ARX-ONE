@@ -11,6 +11,8 @@ if str(SCRIPTS) not in sys.path:
 
 from openpi_client_adapter import build_openpi_arx_observation
 from openpi_client_adapter import check_arx_action_safety
+from openpi_client_adapter import describe_debug_payload
+from openpi_client_adapter import save_debug_observation_images
 from openpi_client_adapter import ActionSafetyError
 from openpi_client_adapter import select_first_openpi_action
 
@@ -86,3 +88,35 @@ def test_check_arx_action_safety_rejects_nonfinite_action():
 
     with pytest.raises(ActionSafetyError, match="finite"):
         check_arx_action_safety(action, qpos, max_joint_step=0.05, max_gripper_step=1.0)
+
+
+def test_describe_debug_payload_summarizes_images_and_vectors():
+    payload = {
+        "observation/images/head": np.zeros((8, 10, 3), dtype=np.uint8),
+        "observation/state": np.arange(14, dtype=np.float32),
+    }
+
+    summary = describe_debug_payload(payload)
+
+    assert summary["observation/images/head"] == {
+        "dtype": "uint8",
+        "shape": [8, 10, 3],
+        "min": 0.0,
+        "max": 0.0,
+    }
+    assert summary["observation/state"]["values"] == list(np.arange(14, dtype=np.float32))
+
+
+def test_save_debug_observation_images_writes_camera_files(tmp_path):
+    payload = {
+        "observation/images/head": np.zeros((8, 10, 3), dtype=np.uint8),
+        "observation/images/right_wrist": np.ones((8, 10, 3), dtype=np.uint8) * 255,
+    }
+
+    paths = save_debug_observation_images(payload, str(tmp_path), prefix="client_obs", step=2)
+
+    assert [path.name for path in paths] == [
+        "client_obs_step_000002_head.jpg",
+        "client_obs_step_000002_right_wrist.jpg",
+    ]
+    assert all(path.is_file() for path in paths)

@@ -91,6 +91,8 @@ from lerobot.utils.utils import (
 )
 from openpi_client_adapter import build_openpi_arx_observation
 from openpi_client_adapter import check_arx_action_safety
+from openpi_client_adapter import describe_debug_payload
+from openpi_client_adapter import save_debug_observation_images
 from openpi_client_adapter import ActionSafetyError
 from openpi_client_adapter import select_first_openpi_action
 
@@ -103,6 +105,13 @@ np.set_printoptions(linewidth=200)
 
 # 禁用科学计数法
 np.set_printoptions(suppress=True)
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass
@@ -468,6 +477,8 @@ def ros_process(args, meta_queue, connected_event, start_event, shm_ready_event,
             except ActionSafetyError as exc:
                 print(f"[SAFETY STOP] {exc}")
                 hold_qpos = np.asarray(obs["qpos"], dtype=np.float32)
+                print(f"[SAFETY STOP] current qpos: {describe_debug_payload(hold_qpos)}")
+                print(f"[SAFETY STOP] rejected action: {describe_debug_payload(action[:14])}")
                 ros_operator.follow_arm_publish(hold_qpos[:7], hold_qpos[7:14])
                 break
 
@@ -663,6 +674,8 @@ def inference_process(cfg, shm_dict, shapes, ros_proc, action_queue):
     action_history = []   # 新增：保存每一步 action
     rate = Rate(cfg.robot.frame_rate)
     timestep = 0
+    debug_io = env_flag("OPENPI_DEBUG_IO", default=True)
+    debug_dir = os.environ.get("OPENPI_DEBUG_DIR", "openpi-arx-debug")
     # while timestep < cfg.robot.max_publish_step and ros_proc.is_alive():
     while timestep <3000 and ros_proc.is_alive():
         obs_dict = {"images": {}, "qpos": None, "qvel": None, "effort": None,
@@ -689,8 +702,22 @@ def inference_process(cfg, shm_dict, shapes, ros_proc, action_queue):
         inference_start = time.time()
         if engine["openpi_client"] is not None:
             openpi_observation = build_openpi_arx_observation(obs_dict, cfg.dataset.single_task)
+            if debug_io:
+                print(f"[DEBUG] client observation: {describe_debug_payload(openpi_observation)}")
+                saved_paths = save_debug_observation_images(
+                    openpi_observation,
+                    debug_dir,
+                    prefix="client_obs",
+                    step=timestep,
+                )
+                if saved_paths:
+                    print(f"[DEBUG] client observation images saved: {[str(path) for path in saved_paths]}")
             results = engine["openpi_client"].infer(openpi_observation)
+            if debug_io:
+                print(f"[DEBUG] client received result: {describe_debug_payload(results)}")
             action = select_first_openpi_action(results)
+            if debug_io:
+                print(f"[DEBUG] client selected action: {describe_debug_payload(action)}")
         else:
             results = infer_step(engine, cfg, observation)
             action = results.squeeze().numpy()
