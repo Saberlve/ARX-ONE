@@ -92,6 +92,7 @@ from lerobot.utils.utils import (
 from openpi_client_adapter import build_openpi_arx_observation
 from openpi_client_adapter import check_arx_action_safety
 from openpi_client_adapter import describe_debug_payload
+from openpi_client_adapter import observation_images_are_nonempty
 from openpi_client_adapter import save_debug_observation_images
 from openpi_client_adapter import ActionSafetyError
 from openpi_client_adapter import select_first_openpi_action
@@ -370,6 +371,16 @@ def cleanup_shm(names):
         except FileNotFoundError:
             pass
 
+def write_obs_to_shm(obs, shm_dict, shapes, camera_names):
+    for cam in camera_names:
+        shm, shape, dtype = shm_dict[cam]
+        np_array = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+        np_array[:] = obs["images"][cam]
+    for state_key in shapes["states"]:
+        shm, shape, dtype = shm_dict[state_key]
+        np_array = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+        np_array[:] = obs[state_key]
+
 def ros_process(args, meta_queue, connected_event, start_event, shm_ready_event, action_queue):
     setup_loader(ROOT)
 
@@ -433,6 +444,7 @@ def ros_process(args, meta_queue, connected_event, start_event, shm_ready_event,
 
     cleanup_shm(shm_name_dict.values())
     shm_dict = create_shm_dict(args, shm_name_dict, shapes, shapes["dtypes"])
+    write_obs_to_shm(obs, shm_dict, shapes, args.camera_names)
     shm_ready_event.set()
 
     rate = Rate(args.frame_rate)
@@ -442,15 +454,7 @@ def ros_process(args, meta_queue, connected_event, start_event, shm_ready_event,
             rate.sleep()
             continue
 
-        # 写入共享内存
-        for cam in args.camera_names:
-            shm, shape, dtype = shm_dict[cam]
-            np_array = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
-            np_array[:] = obs["images"][cam]
-        for state_key in shapes["states"]:
-            shm, shape, dtype = shm_dict[state_key]
-            np_array = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
-            np_array[:] = obs[state_key]
+        write_obs_to_shm(obs, shm_dict, shapes, args.camera_names)
 
         # 读取动作并执行
         action = action_queue.get()
@@ -712,6 +716,12 @@ def inference_process(cfg, shm_dict, shapes, ros_proc, action_queue):
                 )
                 if saved_paths:
                     print(f"[DEBUG] client observation images saved: {[str(path) for path in saved_paths]}")
+            if not observation_images_are_nonempty(openpi_observation):
+                print("[DEBUG] client observation has an empty/black camera frame; skip inference for this step")
+                robot_action(np.zeros_like(obs_dict["qpos"], dtype=np.float32), action_queue)
+                timestep += 1
+                rate.sleep()
+                continue
             results = engine["openpi_client"].infer(openpi_observation)
             if debug_io:
                 print(f"[DEBUG] client received result: {describe_debug_payload(results)}")

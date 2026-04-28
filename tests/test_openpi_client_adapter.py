@@ -12,6 +12,7 @@ if str(SCRIPTS) not in sys.path:
 from openpi_client_adapter import build_openpi_arx_observation
 from openpi_client_adapter import check_arx_action_safety
 from openpi_client_adapter import describe_debug_payload
+from openpi_client_adapter import observation_images_are_nonempty
 from openpi_client_adapter import save_debug_observation_images
 from openpi_client_adapter import ActionSafetyError
 from openpi_client_adapter import select_first_openpi_action
@@ -120,3 +121,23 @@ def test_save_debug_observation_images_writes_camera_files(tmp_path):
         "client_obs_step_000002_right_wrist.jpg",
     ]
     assert all(path.is_file() for path in paths)
+
+
+def test_observation_images_are_nonempty_rejects_black_camera():
+    payload = {
+        "observation/images/head": np.ones((8, 10, 3), dtype=np.uint8),
+        "observation/images/left_wrist": np.zeros((8, 10, 3), dtype=np.uint8),
+        "observation/images/right_wrist": np.ones((8, 10, 3), dtype=np.uint8),
+    }
+
+    assert not observation_images_are_nonempty(payload)
+
+
+def test_observation_images_are_nonempty_accepts_nonblack_cameras():
+    payload = {
+        "observation/images/head": np.ones((8, 10, 3), dtype=np.uint8),
+        "observation/images/left_wrist": np.ones((8, 10, 3), dtype=np.uint8),
+        "observation/images/right_wrist": np.ones((8, 10, 3), dtype=np.uint8),
+    }
+
+    assert observation_images_are_nonempty(payload)

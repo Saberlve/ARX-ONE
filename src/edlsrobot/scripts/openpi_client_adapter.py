@@ -82,6 +82,23 @@ def save_debug_observation_images(payload: dict, debug_dir: str, *, prefix: str,
     return saved_paths
 
 
+def observation_images_are_nonempty(payload: dict, *, min_max_value: float = 1.0) -> bool:
+    image_keys = [
+        "observation/images/head",
+        "observation/images/left_wrist",
+        "observation/images/right_wrist",
+    ]
+    for key in image_keys:
+        if key not in payload:
+            return False
+        image = np.asarray(payload[key])
+        if image.size == 0:
+            return False
+        if float(np.max(image)) < min_max_value:
+            return False
+    return True
+
+
 def build_openpi_arx_observation(obs_dict: dict, prompt: str) -> dict:
     images = obs_dict["images"]
     return {
